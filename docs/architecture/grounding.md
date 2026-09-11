@@ -1,137 +1,106 @@
 # Grounding: Sari-sari store POS
 
 Repo: [Sari-Sari-Store-POS](https://github.com/definitelynotrc/Sari-Sari-Store-POS).
-Current state at planning time: README only. No code, no callers, no existing types.
-Stack constraint from the owner: React and Next.js. This is a portfolio project that must still be a real store system.
+Stack: React and Next.js. Greenfield. Portfolio project that must still be usable at a real counter.
 
-This is greenfield. There is no surrounding system to trace. The constraints come from the domain.
+Owner correction after the first brief: no utang, no barcode scanners. Do not put those in v1. Extra ideas go on a decision list, not into the kernel, until the owner says yes.
 
-## What a sari-sari store actually is
+## v1 scope (build this)
 
-A sari-sari store is a neighborhood convenience window, often the front of the owner's house in the Philippines. One owner, maybe one helper. The counter is a window or a small table. The customer is usually standing, buying 3 to 8 items, paying cash, waiting for sukli (change). The owner is interrupted constantly. The UI that wins is a big-button catalog the owner can tap with a thumb, not a supermarket scan-and-belt flow.
+- Product listings and name search
+- Inventory counts that move when stock arrives and when a sale completes
+- Checkout by tapping or searching products (a POS with no sale is a spreadsheet)
+- Sales totals for day, month, and year
+- Alerts when a product is low on stock, and when a product is not selling
 
-This is not Square, not Shopify POS, and not a grocery lane. Copying those products is the wrong shape.
+## v1 non-scope (do not build until approved)
 
-## Domain facts that must shape the types
+See [later-features.md](later-features.md). That list includes tingi, GCash, offline, voids, cost and profit, helper PINs, and utang. Utang was considered and rejected.
 
-### Tingi (split units)
+No barcode field, scanner flow, or camera scanning in v1.
 
-The same physical pack is sold two ways. A Marlboro pack is 20 sticks. The owner sells the pack, or sells 1 stick. A 12-sachet family pack of shampoo is sold as 12 retail sachets. Eggs are sold by piece. Softdrinks are sold by bottle. Rice, when present, is sold by kilo or by small bag.
+## What a sari-sari counter is
 
-A Product is not a barcode with one price. A Product has one or more Offerings. Each Offering is a sellable unit with its own price and its own stock deduction rule (how much of the base pack it consumes).
+A window or a small table. The owner stands, the customer stands, the basket is 3 to 8 items, payment is usually cash, and the next customer is already talking. The UI is a large-tap catalog plus a search box, on a phone or a cheap tablet.
 
-If the design has `product.price` and `product.stock` as scalars, it cannot represent the store.
+This is not Square and not a grocery lane.
 
-### Utang (customer tab)
+## Domain facts that still shape v1 types
 
-Regulars buy on credit. The owner currently writes this in a notebook (lista). The system must record who owes what, take partial payments against a tab, and show the running balance at the window. Utang is not an afterthought payment type. It is a first-class ledger against a named neighbor.
+### One price, one stock per product
 
-A sale paid with utang still leaves the store. Stock goes down. Cash does not go up. A later payment against the tab is not a sale. It is a collection.
+v1 treats a product as a name, a peso price, and an integer quantity on the shelf. Pack-versus-stick (tingi) is a later-feature candidate. Do not invent `product.price` plus a hidden second unit. If tingi is approved later, the type changes to offerings. Until then, one SKU is one row.
 
-### Cash drawer and sukli
+### No scanner
 
-Cash is the default. GCash and Maya exist and should be recordable, but they are secondary. Change calculation is a daily act. End of day, the owner counts the drawer against the system's expected cash. That reconciliation is how they know if a helper stole, or if they forgot an utang.
-
-### Load and other non-inventory items
-
-Cellphone load is sold constantly and has no shelf stock in the usual sense. Some items are services. The catalog must allow a product that does not decrement inventory.
-
-### Identity of an item
-
-Many SKUs have no barcode, or the owner has no scanner. Primary input is search-by-name and a visual grid of frequent items. Barcode is optional, not the spine of the design.
+Search is by name. Frequent items sit on a tap grid. Identity is `ProductId` plus name, not a barcode.
 
 ### Money
 
-Philippine peso. Store prices are usually whole pesos, sometimes 25/50 centavos. Never use IEEE floats. Integer centavos or a branded Money type backed by integer centavos.
+Philippine peso. Integer centavos only. No IEEE floats.
 
-### Devices and network
+### Sales are facts
 
-Cheap Android phone or tablet, sometimes an old laptop. Prepaid data. Brownouts. The owner will still sell during an outage. A sale that requires a round trip to a server before it is real will lose money and trust.
+A completed sale is immutable. It stores the name and unit price that were in force at checkout, so a later price edit cannot rewrite yesterday's total. A day, month, or year total is a sum over those facts in `Asia/Manila`.
 
-A helper and the owner may both be at the store, but this is usually one device on the counter. Multi-device concurrent checkout is not day-one. If two writers appear later, do not start from a shared mutable cart object.
+### Inventory is a count, not a guess
 
-### Staff
+Receive stock increases the count. Checkout decreases it. Low-stock alerts compare `stockQty` to a per-product threshold. Dead-stock alerts compare "last sold at" to a fixed quiet window (30 days). Alerts are derived. They are not a table the cashier edits.
 
-Owner (full access) and helper (sell, maybe not edit cost, maybe not forgive utang, maybe not see cost/markup). Auth is a PIN on the device, not OAuth theater.
+### One counter, one writer
 
-## What modern POS means here
+Day one is one device, one cashier session. The Next.js server is not a second writer of the same cart. The cart is UI state. Only a completed sale is stored.
 
-Modern means:
+### Reports must not lie about "today"
 
-- Touch-first React UI that works on a phone in landscape or a small tablet
-- Next.js as the application shell (App Router)
-- Typed domain that can run without the UI
-- Offline-capable checkout
-- A daily close that a non-developer can understand
-- A codebase a hiring manager can read in 20 minutes
+"Today" is the calendar day in `Asia/Manila`, not UTC and not the browser's zone. Month and year use that same zone.
 
-Modern does not mean:
+## Use cases v1 must make cheap
 
-- Microservices
-- Kafka
-- Kubernetes
-- BIR-accredited fiscal device integration (that is a legal product of its own; this portfolio system is a store operations POS, not an accredited invoicing device)
-- Multi-branch inventory
-- E-commerce storefront
-- AI recommendations
-
-## Use cases that the architecture must make cheap
-
-1. Customer asks for "isa ng Lucky, tsaka coke, tsaka utang muna". Owner taps 3 items, taps the neighbor's name, confirms. Under 10 seconds. Stock moves. Tab increases. No cash.
-2. Customer pays cash for a mixed basket of pack and tingi of the same brand. Change is shown. Drawer expected cash increases.
-3. Owner opens the day, helper sells all afternoon, owner closes and sees cash expected vs counted, plus utang issued, plus collections.
-4. Power or data dies mid-sale. After restart, that sale is either fully recorded or not recorded. Never half-recorded. Retry must not double-charge the tab or double-decrement stock.
-5. Owner restocks a case of 24. The 24 individual offerings become sellable. Cost is recorded so markup is knowable later.
-6. Owner looks up Aling Nena's tab and records a 200 peso collection.
+1. Owner searches "coke", taps two more items from the grid, confirms. Stock drops. Today's total rises.
+2. Owner types a name fragment and finds the product among tens or a few hundred SKUs.
+3. Owner records a delivery: this product, this many pieces. Count goes up. A low-stock alert on that product clears if it is now above the threshold.
+4. Owner opens reports and sees peso totals and sale counts for today, this month, this year.
+5. Owner opens alerts and sees which products are at or below their threshold, and which have not sold in 30 days.
+6. Power dies mid-confirm. After restart the sale is fully recorded or not recorded. Retry with the same command id must not sell twice.
 
 ## Dominant access patterns
 
-- Read: top ~40 products by recency/frequency for the grid. Sub-10ms on device.
-- Read: name search, prefix, Filipino and English names, typos.
-- Write: complete a sale (the hot path). Must be one atomic domain operation.
-- Write: apply a collection to a customer tab.
-- Write: receive stock.
-- Read: today's drawer, today's sales, open tabs.
-- Read: product stock including tingi remaining.
-
-If a design says "we'll add an index later" for the grid or search, the structure is wrong.
-
-## Concurrent actors
-
-Day one: one POS device, one active cashier session. The Next.js server, if any, is not a second writer of the same cart.
-
-If a future phone and tablet both sell, each device owns its own sale events and a merge happens at the read/sync boundary. Do not start with a shared in-memory cart on the server.
+- Read the frequent-item grid
+- Read name search
+- Write one completed sale (hot path), atomically with stock
+- Write a stock receive
+- Read sales totals for day, month, year
+- Read derived alerts
 
 ## Invariants to encode in types
 
-- Money is integer centavos. PHP only.
-- A Sale is a state machine: `open` -> `completed` | `voided`. Completed sales are immutable. Void is a new compensating record, not an edit.
-- A completed sale has at least one line, a customer-or-walk-in, and a payment allocation that sums to the total.
-- Payment allocation: cash + e-wallet + utang + other = total. Overpay cash produces change. It does not inflate the total.
-- Utang requires a named Customer. Walk-in cannot take utang.
-- An Offering's stock deduction is defined. A non-stock item deducts zero.
-- You cannot sell more tingi than the pack contents remaining, unless the owner explicitly allows negative stock. Represent this as an explicit policy, not a silent clamp.
-- Tab collection reduces balance. Balance cannot go negative on day one.
-- Helper cannot see unit cost. Encode via permission on the query, not by omitting a field in the same type used by the owner.
+- Money is integer centavos, PHP only
+- A sale is `completed`. There is no edit. Void is not in v1
+- A completed sale has at least one line. Each line has qty greater than zero
+- Line totals and the sale total agree
+- Utang, customer tabs, and barcode are not types in this kernel
+- Walk-in is implied. There is no customer record in v1
+- Low stock is `stockQty <= lowStockAt` on an active product
+- Not moving is "no completed sale line for this product in 30 days"
+- Helper cost-hiding is not in v1 because cost is not in v1
 
 ## Stack notes
 
-- TypeScript, Next.js App Router, React.
-- Domain and use-case functions must not import `next/server`, React, or SQL clients.
-- Validate at HTTP/IndexedDB/form boundaries. Trust domain types inside.
-- Prefer one runtime schema library (Zod) at boundaries.
-- Tests of pricing, tingi deduction, utang, and idempotent checkout must run without Next.js.
+- TypeScript, Next.js App Router, React
+- Domain functions do not import `next/server`, React, or SQL clients
+- Validate at the HTTP and form boundary. Trust domain types inside
+- Zod at that boundary
+- Kernel tests run without Next.js
 
 ## Portfolio constraint
 
-The public module map should be small enough to screenshot in a README. A hiring manager should see: domain kernel, Next.js adapters, UI. Not 12 layers.
+A hiring manager should see three parts: kernel, Next.js adapters, UI. Not twelve layers.
 
-## Out of scope for v1
+## Out of scope for the product (not just v1)
 
-- BIR POS accreditation, OR/CR printing as a legal invoice
-- Supplier accounts payable
+- BIR-accredited invoicing
 - Multi-store
-- Barcode hardware drivers
-- Weight scale hardware
-- Employee timekeeping
-- SMS collection reminders
+- Hardware drivers
+- E-commerce
+- Microservices, Kafka, Kubernetes
